@@ -1,0 +1,43 @@
+{{- if and .Values.collector.enabled .Values.collector.hpa.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: vsan-collector
+  namespace: {{ include "vsan-observability.namespace" . }}
+  labels:
+    {{- include "vsan-observability.labels" . | nindent 4 }}
+    app: vsan-collector
+    app.kubernetes.io/component: collector
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: vsan-collector
+  minReplicas: {{ .Values.collector.hpa.minReplicas }}
+  maxReplicas: {{ .Values.collector.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.collector.hpa.targetCPUUtilization }}
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: {{ .Values.collector.hpa.scaleUp.stabilizationWindowSeconds }}
+      policies:
+        - type: Percent
+          value: {{ .Values.collector.hpa.scaleUp.percent }}
+          periodSeconds: {{ .Values.collector.hpa.scaleUp.periodSeconds }}
+        - type: Pods
+          value: {{ .Values.collector.hpa.scaleUp.pods }}
+          periodSeconds: {{ .Values.collector.hpa.scaleUp.periodSeconds }}
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: {{ .Values.collector.hpa.scaleDown.stabilizationWindowSeconds }}
+      policies:
+        - type: Percent
+          value: {{ .Values.collector.hpa.scaleDown.percent }}
+          periodSeconds: {{ .Values.collector.hpa.scaleDown.periodSeconds }}
+      selectPolicy: Min
+{{- end }}

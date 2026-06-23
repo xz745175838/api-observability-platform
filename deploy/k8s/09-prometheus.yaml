@@ -1,0 +1,139 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: vsan-observability
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    rule_files:
+      - /etc/prometheus/rules/rules.yaml
+
+    scrape_configs:
+      - job_name: prometheus
+        static_configs:
+          - targets: ["localhost:9090"]
+
+      - job_name: vsan-collector
+        static_configs:
+          - targets: ["vsan-collector:8080"]
+        metrics_path: /metrics
+
+      - job_name: vsan-processor
+        static_configs:
+          - targets: ["vsan-processor:8081"]
+        metrics_path: /metrics
+  rules.yaml: |
+    groups:
+      - name: vsan-ingest-slo
+        rules:
+          - alert: CollectorDropRateHigh
+            expr: |
+              (
+                sum(rate(collector_drop_total[1m]))
+                /
+                clamp_min(sum(rate(collector_ingest_total[1m])), 1)
+              ) > 0.05
+            for: 1m
+            labels:
+              severity: critical
+              service: vsan-collector
+              slo: ingest-availability
+            annotations:
+              summary: Collector drop rate exceeds 5% (1m)
+              description: |
+                Drop ratio is {{ $value | humanizePercentage }} over the last minute.
+                Backpressure is active — channel may be full. Check collector_channel_utilization,
+                HPA replica count, and Kafka publish rate.
+              runbook_url: "https://github.com/vsan/observability/blob/main/docs/sre-step2-alerting.md#1-丢弃率超标"
+          - alert: CollectorHTTPLatencyP99High
+            expr: |
+              histogram_quantile(0.99,
+                sum(rate(http_request_duration_seconds_bucket{job="vsan-collector"}[1m])) by (le)
+              ) > 0.1
+            for: 2m
+            labels:
+              severity: warning
+              service: vsan-collector
+              slo: ingest-latency
+            annotations:
+              summary: Collector HTTP P99 latency above 100ms (1m)
+              description: |
+                P99 HTTP latency is {{ $value | humanizeDuration }}.
+                Investigate CPU throttling, GC pauses, or worker pool saturation before drops appear.
+              runbook_url: "https://github.com/vsan/observability/blob/main/docs/sre-step2-alerting.md#2-核心延迟劣化"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: vsan-observability
+  labels:
+    app: prometheus
+spec:
+  type: NodePort
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
+      nodePort: 30090
+  selector:
+    app: prometheus
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: vsan-observability
+  labels:
+    app: prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.55.0
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --web.enable-lifecycle
+          ports:
+            - containerPort: 9090
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus/prometheus.yml
+              subPath: prometheus.yml
+            - name: config
+              mountPath: /etc/prometheus/rules/rules.yaml
+              subPath: rules.yaml
+            - name: data
+              mountPath: /prometheus
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9090
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9090
+            initialDelaySeconds: 20
+            periodSeconds: 20
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+        - name: data
+          emptyDir: {}

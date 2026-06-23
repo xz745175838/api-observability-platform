@@ -1,0 +1,77 @@
+{
+  "editable": true,
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus-vsan"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "id": 1,
+      "targets": [{"expr": "sum(rate(collector_ingest_total[5m]))", "legendFormat": "ingest/s", "refId": "A"}],
+      "title": "Collector ingest rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus-vsan"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "id": 2,
+      "targets": [{"expr": "sum(rate(collector_published_total[5m]))", "legendFormat": "published/s", "refId": "A"}],
+      "title": "Collector publish rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus-vsan"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "id": 3,
+      "targets": [{"expr": "sum(rate(collector_drop_total[5m]))", "legendFormat": "drops/s", "refId": "A"}],
+      "title": "Collector drop rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus-vsan"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "id": 4,
+      "targets": [{"expr": "collector_channel_utilization", "legendFormat": "{{channel}}", "refId": "A"}],
+      "title": "Collector channel utilization",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus-vsan"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "id": 5,
+      "targets": [{
+        "expr": "histogram_quantile(0.95, sum(rate(collector_end_to_end_latency_seconds_bucket[5m])) by (le))",
+        "legendFormat": "p95",
+        "refId": "A"
+      }],
+      "title": "Collector e2e latency p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus-vsan"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "id": 6,
+      "targets": [{
+        "expr": "histogram_quantile(0.95, sum(rate(storage_write_latency_seconds_bucket[5m])) by (le, backend))",
+        "legendFormat": "{{backend}}",
+        "refId": "A"
+      }],
+      "title": "Processor write latency p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus-vsan"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
+      "id": 7,
+      "targets": [{"expr": "sum(rate(processor_errors_total[5m])) by (stage, backend)", "legendFormat": "{{stage}}/{{backend}}", "refId": "A"}],
+      "title": "Processor errors",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["vsan", "prometheus"],
+  "time": {"from": "now-1h", "to": "now"},
+  "timezone": "browser",
+  "title": "vSAN Service Metrics",
+  "uid": "vsan-service-metrics",
+  "version": 1
+}

@@ -1,0 +1,104 @@
+{{- if .Values.processor.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.processor.service.name }}
+  namespace: {{ include "vsan-observability.namespace" . }}
+  labels:
+    {{- include "vsan-observability.labels" . | nindent 4 }}
+    app: vsan-processor
+    app.kubernetes.io/component: processor
+spec:
+  type: {{ .Values.processor.service.type }}
+  ports:
+    - name: metrics
+      port: {{ .Values.processor.service.port }}
+      targetPort: {{ .Values.processor.service.port }}
+  selector:
+    app: vsan-processor
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vsan-processor
+  namespace: {{ include "vsan-observability.namespace" . }}
+  labels:
+    {{- include "vsan-observability.labels" . | nindent 4 }}
+    app: vsan-processor
+    app.kubernetes.io/component: processor
+spec:
+  replicas: {{ .Values.processor.replicas }}
+  selector:
+    matchLabels:
+      app: vsan-processor
+  template:
+    metadata:
+      labels:
+        app: vsan-processor
+        {{- include "vsan-observability.labels" . | nindent 8 }}
+        app.kubernetes.io/component: processor
+    spec:
+      {{- include "vsan-observability.podAntiAffinity" (list . "processor" "vsan-processor") | nindent 6 }}
+      initContainers:
+        - name: wait-kafka
+          image: {{ .Values.global.initImage | quote }}
+          {{- include "vsan-observability.resources" .Values.global.initContainerResources | nindent 10 }}
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z {{ .Values.kafka.service.name }} {{ .Values.kafka.service.port }}; do sleep 2; done
+        - name: wait-influx
+          image: {{ .Values.global.initImage | quote }}
+          {{- include "vsan-observability.resources" .Values.global.initContainerResources | nindent 10 }}
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z {{ .Values.influxdb.service.name }} {{ .Values.influxdb.service.port }}; do sleep 2; done
+      containers:
+        - name: processor
+          image: {{ include "vsan-observability.image" .Values.processor.image | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: {{ .Values.processor.service.port }}
+          {{- include "vsan-observability.resources" .Values.processor.resources | nindent 10 }}
+          env:
+            - name: KAFKA_BROKERS
+              value: {{ include "vsan-observability.kafka.brokers" . | quote }}
+            - name: KAFKA_TOPIC
+              value: {{ .Values.kafka.topic.name | quote }}
+            - name: KAFKA_GROUP
+              value: {{ .Values.processor.kafkaGroup | quote }}
+            - name: METRICS_ADDR
+              value: ":{{ .Values.processor.service.port }}"
+            - name: INFLUX_URL
+              value: {{ include "vsan-observability.influxdb.url" . | quote }}
+            - name: INFLUX_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: vsan-influx
+                  key: admin-token
+            - name: INFLUX_ORG
+              valueFrom:
+                secretKeyRef:
+                  name: vsan-influx
+                  key: org
+            - name: INFLUX_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: vsan-influx
+                  key: bucket
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.processor.service.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.processor.service.port }}
+            initialDelaySeconds: 20
+            periodSeconds: 20
+{{- end }}

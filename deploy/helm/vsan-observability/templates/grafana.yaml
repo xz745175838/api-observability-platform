@@ -1,0 +1,187 @@
+{{- if .Values.grafana.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: {{ include "vsan-observability.namespace" . }}
+  labels:
+    {{- include "vsan-observability.labels" . | nindent 4 }}
+    app: grafana
+    app.kubernetes.io/component: grafana
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: InfluxDB
+        uid: influxdb-vsan
+        type: influxdb
+        access: proxy
+        url: {{ include "vsan-observability.influxdb.url" . }}
+        isDefault: true
+        jsonData:
+          version: Flux
+          organization: {{ .Values.influxdb.credentials.org | quote }}
+          defaultBucket: {{ .Values.influxdb.credentials.bucket | quote }}
+          tlsSkipVerify: true
+        secureJsonData:
+          token: {{ .Values.influxdb.credentials.adminToken | quote }}
+      - name: Prometheus
+        uid: prometheus-vsan
+        type: prometheus
+        access: proxy
+        url: {{ include "vsan-observability.prometheus.url" . }}
+        isDefault: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards-provider
+  namespace: {{ include "vsan-observability.namespace" . }}
+  labels:
+    {{- include "vsan-observability.labels" . | nindent 4 }}
+    app: grafana
+    app.kubernetes.io/component: grafana
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: vsan
+        orgId: 1
+        folder: {{ .Values.grafana.dashboardFolder | quote }}
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-vsan-api
+  namespace: {{ include "vsan-observability.namespace" . }}
+  labels:
+    {{- include "vsan-observability.labels" . | nindent 4 }}
+    app: grafana
+    app.kubernetes.io/component: grafana
+data:
+  vsan-api.json: |
+{{ .Files.Get "files/dashboards/vsan-api.json" | indent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-services
+  namespace: {{ include "vsan-observability.namespace" . }}
+  labels:
+    {{- include "vsan-observability.labels" . | nindent 4 }}
+    app: grafana
+    app.kubernetes.io/component: grafana
+data:
+  vsan-services.json: |
+{{ .Files.Get "files/dashboards/vsan-services.json" | indent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.grafana.service.name }}
+  namespace: {{ include "vsan-observability.namespace" . }}
+  labels:
+    {{- include "vsan-observability.labels" . | nindent 4 }}
+    app: grafana
+    app.kubernetes.io/component: grafana
+spec:
+  type: {{ .Values.grafana.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.grafana.service.port }}
+      targetPort: {{ .Values.grafana.service.port }}
+      {{- if and (eq .Values.grafana.service.type "NodePort") .Values.grafana.service.nodePort }}
+      nodePort: {{ .Values.grafana.service.nodePort }}
+      {{- end }}
+  selector:
+    app: grafana
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: {{ include "vsan-observability.namespace" . }}
+  labels:
+    {{- include "vsan-observability.labels" . | nindent 4 }}
+    app: grafana
+    app.kubernetes.io/component: grafana
+spec:
+  replicas: {{ .Values.grafana.replicas }}
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+        {{- include "vsan-observability.labels" . | nindent 8 }}
+        app.kubernetes.io/component: grafana
+    spec:
+      initContainers:
+        - name: wait-influx
+          image: {{ .Values.global.initImage | quote }}
+          {{- include "vsan-observability.resources" .Values.global.initContainerResources | nindent 10 }}
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z {{ .Values.influxdb.service.name }} {{ .Values.influxdb.service.port }}; do sleep 2; done
+      containers:
+        - name: grafana
+          image: {{ .Values.grafana.image | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: {{ .Values.grafana.service.port }}
+          {{- include "vsan-observability.resources" .Values.grafana.resources | nindent 10 }}
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: vsan-grafana
+                  key: admin-user
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vsan-grafana
+                  key: admin-password
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: {{ .Values.grafana.allowSignUp | quote }}
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboards-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: {{ .Values.grafana.service.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: {{ .Values.grafana.service.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+      volumes:
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+        - name: dashboards-provider
+          configMap:
+            name: grafana-dashboards-provider
+        - name: dashboards
+          projected:
+            sources:
+              - configMap:
+                  name: grafana-dashboard-vsan-api
+              - configMap:
+                  name: grafana-dashboard-services
+{{- end }}

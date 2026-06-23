@@ -1,0 +1,22 @@
+{{- if and .Values.collector.enabled .Values.collector.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: vsan-collector
+  namespace: {{ include "vsan-observability.namespace" . }}
+  labels:
+    {{- include "vsan-observability.labels" . | nindent 4 }}
+    app: vsan-collector
+    app.kubernetes.io/component: collector
+spec:
+  {{- if .Values.collector.pdb.minAvailable }}
+  minAvailable: {{ .Values.collector.pdb.minAvailable }}
+  {{- else if .Values.collector.pdb.maxUnavailable }}
+  maxUnavailable: {{ .Values.collector.pdb.maxUnavailable }}
+  {{- else }}
+  minAvailable: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      app: vsan-collector
+{{- end }}

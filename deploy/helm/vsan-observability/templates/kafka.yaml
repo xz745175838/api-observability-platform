@@ -1,0 +1,88 @@
+{{- if .Values.kafka.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.kafka.service.name }}
+  namespace: {{ include "vsan-observability.namespace" . }}
+  labels:
+    {{- include "vsan-observability.labels" . | nindent 4 }}
+    app: kafka
+    app.kubernetes.io/component: kafka
+spec:
+  ports:
+    - name: plaintext
+      port: {{ .Values.kafka.service.port }}
+      targetPort: {{ .Values.kafka.service.port }}
+  selector:
+    app: kafka
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka
+  namespace: {{ include "vsan-observability.namespace" . }}
+  labels:
+    {{- include "vsan-observability.labels" . | nindent 4 }}
+    app: kafka
+    app.kubernetes.io/component: kafka
+spec:
+  replicas: {{ .Values.kafka.replicas }}
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+        {{- include "vsan-observability.labels" . | nindent 8 }}
+        app.kubernetes.io/component: kafka
+    spec:
+      {{- include "vsan-observability.podAntiAffinity" (list . "kafka" "kafka") | nindent 6 }}
+      containers:
+        - name: kafka
+          image: {{ .Values.kafka.image | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: {{ .Values.kafka.service.port }}
+              name: plaintext
+          {{- include "vsan-observability.resources" .Values.kafka.resources | nindent 10 }}
+          env:
+            - name: KAFKA_NODE_ID
+              value: "1"
+            - name: KAFKA_PROCESS_ROLES
+              value: broker,controller
+            - name: KAFKA_LISTENERS
+              value: PLAINTEXT://:{{ .Values.kafka.service.port }},CONTROLLER://:9093
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: PLAINTEXT://{{ .Values.kafka.service.name }}:{{ .Values.kafka.service.port }}
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: CONTROLLER
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: 1@localhost:9093
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: {{ .Values.kafka.defaultReplicationFactor | default .Values.kafka.topic.replicationFactor | quote }}
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: {{ .Values.kafka.defaultReplicationFactor | default .Values.kafka.topic.replicationFactor | quote }}
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: {{ .Values.kafka.minInsyncReplicas | quote }}
+            - name: KAFKA_MIN_INSYNC_REPLICAS
+              value: {{ .Values.kafka.minInsyncReplicas | quote }}
+            - name: KAFKA_DEFAULT_REPLICATION_FACTOR
+              value: {{ .Values.kafka.defaultReplicationFactor | default .Values.kafka.topic.replicationFactor | quote }}
+            - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+              value: "0"
+            - name: KAFKA_LOG_DIRS
+              value: {{ .Values.kafka.storage.logDirs | quote }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.kafka.service.port }}
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.kafka.service.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+{{- end }}

@@ -1,0 +1,76 @@
+{{- if .Values.collector.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.collector.service.name }}
+  namespace: {{ include "vsan-observability.namespace" . }}
+  labels:
+    {{- include "vsan-observability.labels" . | nindent 4 }}
+    app: vsan-collector
+    app.kubernetes.io/component: collector
+spec:
+  type: {{ .Values.collector.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.collector.service.port }}
+      targetPort: {{ .Values.collector.service.port }}
+      {{- if and (eq .Values.collector.service.type "NodePort") .Values.collector.service.nodePort }}
+      nodePort: {{ .Values.collector.service.nodePort }}
+      {{- end }}
+  selector:
+    app: vsan-collector
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vsan-collector
+  namespace: {{ include "vsan-observability.namespace" . }}
+  labels:
+    {{- include "vsan-observability.labels" . | nindent 4 }}
+    app: vsan-collector
+    app.kubernetes.io/component: collector
+spec:
+  replicas: {{ .Values.collector.replicas }}
+  selector:
+    matchLabels:
+      app: vsan-collector
+  template:
+    metadata:
+      labels:
+        app: vsan-collector
+        {{- include "vsan-observability.labels" . | nindent 8 }}
+        app.kubernetes.io/component: collector
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.collector.terminationGracePeriodSeconds }}
+      {{- include "vsan-observability.podAntiAffinity" (list . "collector" "vsan-collector") | nindent 6 }}
+      containers:
+        - name: collector
+          image: {{ include "vsan-observability.image" .Values.collector.image | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: {{ .Values.collector.service.port }}
+          {{- include "vsan-observability.resources" .Values.collector.resources | nindent 10 }}
+          env:
+            - name: HTTP_ADDR
+              value: ":{{ .Values.collector.service.port }}"
+            - name: KAFKA_BROKERS
+              value: {{ include "vsan-observability.kafka.brokers" . | quote }}
+            - name: KAFKA_TOPIC
+              value: {{ .Values.kafka.topic.name | quote }}
+            - name: CHANNEL_CAP
+              value: {{ .Values.collector.backpressure.channelCap | quote }}
+            - name: DROP_POLICY
+              value: {{ .Values.collector.backpressure.dropPolicy | quote }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.collector.service.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.collector.service.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+{{- end }}

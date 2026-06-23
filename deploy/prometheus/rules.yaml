@@ -1,0 +1,44 @@
+# Prometheus alerting rules for vSAN observability.
+# Source of truth: deploy/helm/vsan-observability/files/prometheus/rules.yaml
+# (loaded via Helm ConfigMap in templates/prometheus.yaml)
+groups:
+  - name: vsan-ingest-slo
+    rules:
+      # SLO: drop ratio must stay below 5% (channel backpressure / data loss).
+      - alert: CollectorDropRateHigh
+        expr: |
+          (
+            sum(rate(collector_drop_total[1m]))
+            /
+            clamp_min(sum(rate(collector_ingest_total[1m])), 1)
+          ) > 0.05
+        for: 30s
+        labels:
+          severity: critical
+          service: vsan-collector
+          slo: ingest-availability
+        annotations:
+          summary: Collector drop rate exceeds 5% (1m)
+          description: |
+            Drop ratio is {{ $value | humanizePercentage }} over the last minute.
+            Backpressure is active — channel may be full. Check collector_channel_utilization,
+            HPA replica count, and Kafka publish rate.
+          runbook_url: "https://github.com/vsan/observability/blob/main/docs/sre-step2-alerting.md#1-丢弃率超标"
+
+      # SLO: HTTP ingest path P99 latency must stay below 100ms.
+      - alert: CollectorHTTPLatencyP99High
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket{job="vsan-collector"}[1m])) by (le)
+          ) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: vsan-collector
+          slo: ingest-latency
+        annotations:
+          summary: Collector HTTP P99 latency above 100ms (1m)
+          description: |
+            P99 HTTP latency is {{ $value | humanizeDuration }}.
+            Investigate CPU throttling, GC pauses, or worker pool saturation before drops appear.
+          runbook_url: "https://github.com/vsan/observability/blob/main/docs/sre-step2-alerting.md#2-核心延迟劣化"

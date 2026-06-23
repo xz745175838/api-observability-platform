@@ -1,0 +1,55 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: vsan-query-api
+  namespace: vsan-observability
+  labels:
+    app: vsan-query-api
+spec:
+  type: NodePort
+  ports:
+    - name: http
+      port: 8082
+      targetPort: 8082
+      nodePort: 30082
+  selector:
+    app: vsan-query-api
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vsan-query-api
+  namespace: vsan-observability
+  labels:
+    app: vsan-query-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vsan-query-api
+  template:
+    metadata:
+      labels:
+        app: vsan-query-api
+    spec:
+      containers:
+        - name: query-api
+          image: vsan-query-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8082
+          env:
+            - name: HTTP_ADDR
+              value: ":8082"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8082
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8082
+            initialDelaySeconds: 10
+            periodSeconds: 20

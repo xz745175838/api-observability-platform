@@ -1,0 +1,14 @@
+apiVersion: v2
+name: vsan-observability
+description: vSAN API Observability Platform — Kafka, InfluxDB, Collector, Processor, Grafana, Prometheus
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - observability
+  - kafka
+  - influxdb
+  - prometheus
+  - grafana
+maintainers:
+  - name: vsan-sre

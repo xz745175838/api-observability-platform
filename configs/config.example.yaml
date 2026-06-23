@@ -1,0 +1,29 @@
+collector:
+  http_addr: ":8080"
+  kafka:
+    brokers: ["localhost:9092"]
+    topic: vsan-api-logs
+    async: false
+    batch_timeout: 50ms
+  backpressure:
+    channel_capacity: 10000
+    drop_policy: drop_newest  # drop_newest | drop_oldest
+    high_watermark: 0.8
+  shutdown_timeout: 45s
+
+processor:
+  metrics_addr: ":8081"
+  kafka:
+    brokers: ["localhost:9092"]
+    topic: vsan-api-logs
+    group_id: vsan-processor
+  batch:
+    max_points: 500
+    flush_interval: 200ms
+  influxdb:
+    url: ""  # e.g. http://influx:8086
+    org: ""
+    bucket: vsan
+
+query_api:
+  http_addr: ":8082"

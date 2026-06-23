@@ -1,0 +1,101 @@
+{{- if .Values.influxdb.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.influxdb.service.name }}
+  namespace: {{ include "vsan-observability.namespace" . }}
+  labels:
+    {{- include "vsan-observability.labels" . | nindent 4 }}
+    app: influxdb
+    app.kubernetes.io/component: influxdb
+spec:
+  ports:
+    - name: http
+      port: {{ .Values.influxdb.service.port }}
+      targetPort: {{ .Values.influxdb.service.port }}
+  selector:
+    app: influxdb
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: influxdb
+  namespace: {{ include "vsan-observability.namespace" . }}
+  labels:
+    {{- include "vsan-observability.labels" . | nindent 4 }}
+    app: influxdb
+    app.kubernetes.io/component: influxdb
+spec:
+  serviceName: {{ .Values.influxdb.service.name }}
+  replicas: {{ .Values.influxdb.replicas }}
+  selector:
+    matchLabels:
+      app: influxdb
+  template:
+    metadata:
+      labels:
+        app: influxdb
+        {{- include "vsan-observability.labels" . | nindent 8 }}
+        app.kubernetes.io/component: influxdb
+    spec:
+      containers:
+        - name: influxdb
+          image: {{ .Values.influxdb.image | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: {{ .Values.influxdb.service.port }}
+              name: http
+          {{- include "vsan-observability.resources" .Values.influxdb.resources | nindent 10 }}
+          env:
+            - name: DOCKER_INFLUXDB_INIT_MODE
+              value: setup
+            - name: DOCKER_INFLUXDB_INIT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: vsan-influx
+                  key: admin-user
+            - name: DOCKER_INFLUXDB_INIT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vsan-influx
+                  key: admin-password
+            - name: DOCKER_INFLUXDB_INIT_ORG
+              valueFrom:
+                secretKeyRef:
+                  name: vsan-influx
+                  key: org
+            - name: DOCKER_INFLUXDB_INIT_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: vsan-influx
+                  key: bucket
+            - name: DOCKER_INFLUXDB_INIT_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: vsan-influx
+                  key: admin-token
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/influxdb2
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.influxdb.service.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.influxdb.service.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          {{- toYaml .Values.influxdb.persistence.accessModes | nindent 10 }}
+        resources:
+          requests:
+            storage: {{ .Values.influxdb.persistence.size }}
+{{- end }}

@@ -1,0 +1,295 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: vsan-observability
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: InfluxDB
+        uid: influxdb-vsan
+        type: influxdb
+        access: proxy
+        url: http://influxdb:8086
+        isDefault: true
+        jsonData:
+          version: Flux
+          organization: vsan
+          defaultBucket: vsan
+          tlsSkipVerify: true
+        secureJsonData:
+          token: vsan-dev-token
+      - name: Prometheus
+        uid: prometheus-vsan
+        type: prometheus
+        access: proxy
+        url: http://prometheus:9090
+        isDefault: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards-provider
+  namespace: vsan-observability
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: vsan
+        orgId: 1
+        folder: vSAN Observability
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-vsan-api
+  namespace: vsan-observability
+data:
+  vsan-api.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "datasource": {"type": "influxdb", "uid": "influxdb-vsan"},
+          "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "id": 1,
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}},
+          "targets": [
+            {
+              "query": "from(bucket: \"vsan\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"vsan_api\")\n  |> filter(fn: (r) => r[\"_field\"] == \"latency_ms\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield(name: \"mean\")",
+              "refId": "A"
+            }
+          ],
+          "title": "API latency (mean)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "influxdb", "uid": "influxdb-vsan"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "id": 2,
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}},
+          "targets": [
+            {
+              "query": "from(bucket: \"vsan\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"vsan_api\")\n  |> filter(fn: (r) => r[\"_field\"] == \"status_code\")\n  |> aggregateWindow(every: v.windowPeriod, fn: count, createEmpty: false)\n  |> yield(name: \"count\")",
+              "refId": "A"
+            }
+          ],
+          "title": "API requests by status",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "influxdb", "uid": "influxdb-vsan"},
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
+          "id": 3,
+          "options": {"showHeader": true},
+          "targets": [
+            {
+              "query": "from(bucket: \"vsan\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"vsan_api\")\n  |> filter(fn: (r) => r[\"_field\"] == \"latency_ms\")\n  |> group(columns: [\"api\"])\n  |> mean()\n  |> group()\n  |> sort(columns: [\"_value\"], desc: true)",
+              "refId": "A"
+            }
+          ],
+          "title": "Mean latency by API",
+          "type": "table"
+        }
+      ],
+      "refresh": "10s",
+      "schemaVersion": 39,
+      "tags": ["vsan", "api"],
+      "templating": {"list": []},
+      "time": {"from": "now-1h", "to": "now"},
+      "timezone": "browser",
+      "title": "vSAN API Observability",
+      "uid": "vsan-api-observability",
+      "version": 1
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-services
+  namespace: vsan-observability
+data:
+  vsan-services.json: |
+    {
+      "editable": true,
+      "panels": [
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus-vsan"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "id": 1,
+          "targets": [{"expr": "sum(rate(collector_ingest_total[5m]))", "legendFormat": "ingest/s", "refId": "A"}],
+          "title": "Collector ingest rate",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus-vsan"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "id": 2,
+          "targets": [{"expr": "sum(rate(collector_published_total[5m]))", "legendFormat": "published/s", "refId": "A"}],
+          "title": "Collector publish rate",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus-vsan"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "id": 3,
+          "targets": [{"expr": "sum(rate(collector_drop_total[5m]))", "legendFormat": "drops/s", "refId": "A"}],
+          "title": "Collector drop rate",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus-vsan"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "id": 4,
+          "targets": [{"expr": "collector_channel_utilization", "legendFormat": "{{channel}}", "refId": "A"}],
+          "title": "Collector channel utilization",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus-vsan"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+          "id": 5,
+          "targets": [{
+            "expr": "histogram_quantile(0.95, sum(rate(collector_end_to_end_latency_seconds_bucket[5m])) by (le))",
+            "legendFormat": "p95",
+            "refId": "A"
+          }],
+          "title": "Collector e2e latency p95",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus-vsan"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+          "id": 6,
+          "targets": [{
+            "expr": "histogram_quantile(0.95, sum(rate(storage_write_latency_seconds_bucket[5m])) by (le, backend))",
+            "legendFormat": "{{backend}}",
+            "refId": "A"
+          }],
+          "title": "Processor write latency p95",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus-vsan"},
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
+          "id": 7,
+          "targets": [{"expr": "sum(rate(processor_errors_total[5m])) by (stage, backend)", "legendFormat": "{{stage}}/{{backend}}", "refId": "A"}],
+          "title": "Processor errors",
+          "type": "timeseries"
+        }
+      ],
+      "refresh": "10s",
+      "schemaVersion": 39,
+      "tags": ["vsan", "prometheus"],
+      "time": {"from": "now-1h", "to": "now"},
+      "timezone": "browser",
+      "title": "vSAN Service Metrics",
+      "uid": "vsan-service-metrics",
+      "version": 1
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: vsan-observability
+  labels:
+    app: grafana
+spec:
+  type: NodePort
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+      nodePort: 30300
+  selector:
+    app: grafana
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: vsan-observability
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      initContainers:
+        - name: wait-influx
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z influxdb 8086; do sleep 2; done
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.3.0
+          ports:
+            - containerPort: 3000
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: vsan-grafana
+                  key: admin-user
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vsan-grafana
+                  key: admin-password
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboards-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+      volumes:
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+        - name: dashboards-provider
+          configMap:
+            name: grafana-dashboards-provider
+        - name: dashboards
+          projected:
+            sources:
+              - configMap:
+                  name: grafana-dashboard-vsan-api
+              - configMap:
+                  name: grafana-dashboard-services

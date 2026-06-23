@@ -1,0 +1,66 @@
+{{- if .Values.queryApi.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.queryApi.service.name }}
+  namespace: {{ include "vsan-observability.namespace" . }}
+  labels:
+    {{- include "vsan-observability.labels" . | nindent 4 }}
+    app: vsan-query-api
+    app.kubernetes.io/component: query-api
+spec:
+  type: {{ .Values.queryApi.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.queryApi.service.port }}
+      targetPort: {{ .Values.queryApi.service.port }}
+      {{- if and (eq .Values.queryApi.service.type "NodePort") .Values.queryApi.service.nodePort }}
+      nodePort: {{ .Values.queryApi.service.nodePort }}
+      {{- end }}
+  selector:
+    app: vsan-query-api
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vsan-query-api
+  namespace: {{ include "vsan-observability.namespace" . }}
+  labels:
+    {{- include "vsan-observability.labels" . | nindent 4 }}
+    app: vsan-query-api
+    app.kubernetes.io/component: query-api
+spec:
+  replicas: {{ .Values.queryApi.replicas }}
+  selector:
+    matchLabels:
+      app: vsan-query-api
+  template:
+    metadata:
+      labels:
+        app: vsan-query-api
+        {{- include "vsan-observability.labels" . | nindent 8 }}
+        app.kubernetes.io/component: query-api
+    spec:
+      containers:
+        - name: query-api
+          image: {{ include "vsan-observability.image" .Values.queryApi.image | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: {{ .Values.queryApi.service.port }}
+          {{- include "vsan-observability.resources" .Values.queryApi.resources | nindent 10 }}
+          env:
+            - name: HTTP_ADDR
+              value: ":{{ .Values.queryApi.service.port }}"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.queryApi.service.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.queryApi.service.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+{{- end }}

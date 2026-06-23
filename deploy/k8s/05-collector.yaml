@@ -1,0 +1,74 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: vsan-collector
+  namespace: vsan-observability
+  labels:
+    app: vsan-collector
+spec:
+  type: NodePort
+  ports:
+    - name: http
+      port: 8080         # 集群内其他 Pod 访问：svc名称:8080，kube-proxy 把流量转发到后端 Pod 的 targetPort
+      targetPort: 8080   # 容器里应用启动监听的端口，程序listen 0.0.0.0:8080，固定 Pod 内部端口
+      nodePort: 30080    # 外网 / 集群外：任意节点IP:30080 → 进到 Service → 再打到 Pod
+  selector:
+    app: vsan-collector
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vsan-collector
+  namespace: vsan-observability
+  labels:
+    app: vsan-collector
+spec:
+  # Initial replica count; HPA (10-collector-hpa.yaml) manages scale between 1–5.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vsan-collector
+  template:
+    metadata:
+      labels:
+        app: vsan-collector
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: collector
+          image: vsan-collector:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          resources:
+            # HPA 依赖 requests 计算利用率；本地压测用较小 quota 便于触发扩容
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          env:
+            - name: HTTP_ADDR
+              value: ":8080"
+            - name: KAFKA_BROKERS
+              value: "kafka:9092"
+            - name: KAFKA_TOPIC
+              value: vsan-api-logs
+            - name: CHANNEL_CAP
+              value: "10000"
+            - name: DROP_POLICY
+              value: drop_newest
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080  # 这是容器监听的 HTTP 端口
+         
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20

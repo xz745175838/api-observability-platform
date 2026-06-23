@@ -1,0 +1,223 @@
+# Default values for minikube one-click deploy:
+#   helm install vsan ./deploy/helm/vsan-observability -n vsan-observability --create-namespace
+#
+# Production HA / DR preset (anti-affinity, PDB, Kafka RF=3, quotas):
+#   helm upgrade --install vsan ./deploy/helm/vsan-observability \
+#     -n vsan-observability -f values-prod.yaml --wait --atomic
+
+namespace:
+  create: false
+  name: vsan-observability
+
+global:
+  imagePullPolicy: IfNotPresent
+  initImage: busybox:1.36
+  # Pod anti-affinity defaults (override per component). Disabled for single-node minikube.
+  podAntiAffinity:
+    enabled: false
+    type: soft          # soft = preferred spread; hard = required (needs >= replicas worker nodes)
+    topologyKey: kubernetes.io/hostname
+    weight: 100
+  initContainerResources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      cpu: 50m
+      memory: 32Mi
+
+# ---------------------------------------------------------------------------
+# Kafka (KRaft — minikube: 1 broker; prod: see values-prod.yaml for 3-broker topology)
+# ---------------------------------------------------------------------------
+kafka:
+  enabled: true
+  replicas: 1
+  image: apache/kafka:3.8.1
+  service:
+    name: kafka
+    port: 9092
+  storage:
+    logDirs: /tmp/kraft-combined-logs
+  # Broker-level defaults (wired to KAFKA_* env). Prod 3-broker: set minInsyncReplicas: 2.
+  minInsyncReplicas: 1
+  defaultReplicationFactor: 1
+  podAntiAffinity: {}   # inherit global; set enabled: true in prod
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  topic:
+    enabled: true
+    name: vsan-api-logs
+    partitions: 3
+    replicationFactor: 1
+    minInsyncReplicas: 1   # --config min.insync.replicas on topic create; prod: 2 with RF=3
+    backoffLimit: 12
+
+# ---------------------------------------------------------------------------
+# InfluxDB 2.x (StatefulSet + PVC)
+# ---------------------------------------------------------------------------
+influxdb:
+  enabled: true
+  replicas: 1
+  image: influxdb:2.7
+  service:
+    name: influxdb
+    port: 8086
+  persistence:
+    size: 5Gi
+    accessModes:
+      - ReadWriteOnce
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  credentials:
+    adminUser: admin
+    adminPassword: vsan-admin
+    adminToken: vsan-dev-token
+    org: vsan
+    bucket: vsan
+
+# ---------------------------------------------------------------------------
+# Collector (HTTP ingest → Kafka)
+# ---------------------------------------------------------------------------
+collector:
+  enabled: true
+  replicas: 1
+  image:
+    repository: vsan-collector
+    tag: latest
+  service:
+    name: vsan-collector
+    type: NodePort
+    port: 8080
+    nodePort: 30080
+  terminationGracePeriodSeconds: 60
+  podAntiAffinity: {}
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  backpressure:
+    channelCap: 10000
+    dropPolicy: drop_newest
+  pdb:
+    enabled: false       # enable in prod (values-prod.yaml)
+    minAvailable: 1
+    maxUnavailable: null
+  hpa:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilization: 50
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      percent: 100
+      pods: 2
+      periodSeconds: 15
+    scaleDown:
+      stabilizationWindowSeconds: 60
+      percent: 50
+      periodSeconds: 60
+
+# ---------------------------------------------------------------------------
+# Processor (Kafka → InfluxDB)
+# ---------------------------------------------------------------------------
+processor:
+  enabled: true
+  replicas: 1
+  image:
+    repository: vsan-processor
+    tag: latest
+  service:
+    name: vsan-processor
+    type: ClusterIP
+    port: 8081
+  kafkaGroup: vsan-processor
+  podAntiAffinity: {}
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ---------------------------------------------------------------------------
+# Query API (stub)
+# ---------------------------------------------------------------------------
+queryApi:
+  enabled: true
+  replicas: 1
+  image:
+    repository: vsan-query-api
+    tag: latest
+  service:
+    name: vsan-query-api
+    type: NodePort
+    port: 8082
+    nodePort: 30082
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ---------------------------------------------------------------------------
+# Prometheus + alerting rules
+# ---------------------------------------------------------------------------
+prometheus:
+  enabled: true
+  replicas: 1
+  image: prom/prometheus:v2.55.0
+  service:
+    name: prometheus
+    type: NodePort
+    port: 9090
+    nodePort: 30090
+  scrapeInterval: 15s
+  evaluationInterval: 15s
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ---------------------------------------------------------------------------
+# Grafana + dashboards
+# ---------------------------------------------------------------------------
+grafana:
+  enabled: true
+  replicas: 1
+  image: grafana/grafana:11.3.0
+  service:
+    name: grafana
+    type: NodePort
+    port: 3000
+    nodePort: 30300
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  credentials:
+    adminUser: admin
+    adminPassword: admin
+  allowSignUp: false
+  dashboardFolder: vSAN Observability

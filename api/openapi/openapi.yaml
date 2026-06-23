@@ -1,0 +1,41 @@
+openapi: 3.0.3
+info:
+  title: vSAN API Observability Ingest
+  version: 0.1.0
+paths:
+  /v1/ingest:
+    post:
+      summary: Ingest single JSON LogEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ts:
+                  type: string
+                  format: date-time
+                source:
+                  type: string
+                tenant:
+                  type: string
+                api_name:
+                  type: string
+                latency_ms:
+                  type: number
+                status_code:
+                  type: integer
+      responses:
+        '202':
+          description: Accepted into internal buffer
+        '503':
+          description: Queue saturated (drop_newest)
+  /healthz:
+    get:
+      responses:
+        '200':
+          description: OK
+  /metrics:
+    get:
+      summary: Prometheus metrics
