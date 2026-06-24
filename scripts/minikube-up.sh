@@ -21,7 +21,9 @@ Options:
   -h, --help             Show this help
 
 Environment:
-  NAMESPACE   Kubernetes namespace (default: vsan-observability)
+  NAMESPACE          Kubernetes namespace (default: vsan-observability)
+  MINIKUBE_PROFILE   minikube profile (e.g. vsan-ha for 3-node HA)
+  MINIKUBE_NODES     node count when starting a new profile (default: 3 for vsan-ha, 1 otherwise)
 EOF
 }
 
@@ -54,25 +56,39 @@ else
   echo "warning: helm not found — will fall back to kubectl apply deploy/k8s/" >&2
 fi
 
+MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-}"
+MINIKUBE_ARGS=()
+[[ -n "${MINIKUBE_PROFILE}" ]] && MINIKUBE_ARGS=(-p "${MINIKUBE_PROFILE}")
+if [[ -n "${MINIKUBE_NODES:-}" ]]; then
+  :
+elif [[ "${MINIKUBE_PROFILE}" == "vsan-ha" ]]; then
+  MINIKUBE_NODES=3
+else
+  MINIKUBE_NODES=1
+fi
+
 if ! $SKIP_MINIKUBE_START; then
-  if ! minikube status >/dev/null 2>&1; then
-    echo "==> starting minikube..."
-    minikube start --cpus=4 --memory=6144
+  if ! minikube status "${MINIKUBE_ARGS[@]}" >/dev/null 2>&1; then
+    echo "==> starting minikube profile=${MINIKUBE_PROFILE:-default} nodes=${MINIKUBE_NODES}..."
+    if [[ "${MINIKUBE_NODES}" -gt 1 ]]; then
+      # 3-node HA: enough per node for Kafka + app pods (values-prod requests).
+      minikube start "${MINIKUBE_ARGS[@]}" --nodes="${MINIKUBE_NODES}" --cpus=3 --memory=6144
+    else
+      # Single-node full stack (values-prod): Kafka 1 CPU/2Gi + InfluxDB + apps.
+      minikube start "${MINIKUBE_ARGS[@]}" --cpus=6 --memory=8192
+    fi
   else
-    echo "==> minikube already running"
+    echo "==> minikube already running (profile=${MINIKUBE_PROFILE:-default})"
   fi
 fi
 
 echo "==> enabling metrics-server (required for HPA and kubectl top)"
-minikube addons enable metrics-server >/dev/null 2>&1 || true
+minikube addons enable metrics-server "${MINIKUBE_ARGS[@]}" >/dev/null 2>&1 || true
 if kubectl get deployment metrics-server -n kube-system >/dev/null 2>&1; then
   kubectl rollout status deployment/metrics-server -n kube-system --timeout=120s || true
 fi
 
 echo "==> using minikube docker daemon (single-node) or host docker + image load (multi-node)"
-MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-}"
-MINIKUBE_ARGS=()
-[[ -n "${MINIKUBE_PROFILE}" ]] && MINIKUBE_ARGS=(-p "${MINIKUBE_PROFILE}")
 multinode=false
 if minikube node list "${MINIKUBE_ARGS[@]}" 2>/dev/null | grep -qE 'm0[2-9]'; then
   multinode=true
@@ -113,7 +129,7 @@ if $HAS_HELM && [[ -f "${CHART}/Chart.yaml" ]]; then
     -f "${CHART}/values.yaml" \
     -f "${CHART}/values-prod.yaml" \
     --wait \
-    --timeout 1200s
+    --timeout 1800s
 else
   echo "==> applying kubernetes manifests (legacy)..."
   kubectl apply -f "${ROOT}/deploy/k8s/"
@@ -138,7 +154,7 @@ kubectl rollout status deployment/vsan-query-api -n "$NS" --timeout=300s
 kubectl rollout status deployment/prometheus -n "$NS" --timeout=300s
 kubectl rollout status deployment/grafana -n "$NS" --timeout=300s
 
-MINIKUBE_IP="$(minikube ip)"
+MINIKUBE_IP="$(minikube ip "${MINIKUBE_ARGS[@]}")"
 GRAFANA_URL="http://${MINIKUBE_IP}:30300"
 PROMETHEUS_URL="http://${MINIKUBE_IP}:30090"
 COLLECTOR_URL="http://${MINIKUBE_IP}:30080"
